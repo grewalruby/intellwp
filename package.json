@@ -1,0 +1,16 @@
+{
+  "name": "intelligent-order-workspace",
+  "version": "1.0.0",
+  "description": "Intelligent Order Workspace - Infor LN backend proxy and static workspace UI",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "4.22.3"
+  }
+}
