@@ -19,26 +19,57 @@ let cachedToken = null;
 let cachedTokenExpiresAt = 0;
 
 /**
- * Loads and parses the .ionapi credentials file.
- * Path can be overridden with the IONAPI_PATH environment variable.
+ * Loads LN credentials.
+ *
+ * Two supported sources, checked in this order:
+ *   1. Environment variables (used on Render and other hosts where you
+ *      don't want a credentials file on disk at all):
+ *        LN_TI    -> ti   (tenant id)
+ *        LN_CI    -> ci   (client id)
+ *        LN_CS    -> cs   (client secret)
+ *        LN_IU    -> iu   (ION API base URL)
+ *        LN_PU    -> pu   (SSO base URL)
+ *        LN_OT    -> ot   (token path)
+ *        LN_SAAK  -> saak (service account access key)
+ *        LN_SASK  -> sask (service account secret key)
+ *   2. A .ionapi JSON file on disk (used for local development), at the
+ *      path in IONAPI_PATH or config/credentials.ionapi by default.
  */
 function loadConfig() {
   if (cachedConfig) return cachedConfig;
+
+  const envConfig = {
+    ti: process.env.LN_TI,
+    ci: process.env.LN_CI,
+    cs: process.env.LN_CS,
+    iu: process.env.LN_IU,
+    pu: process.env.LN_PU,
+    ot: process.env.LN_OT,
+    saak: process.env.LN_SAAK,
+    sask: process.env.LN_SASK,
+  };
+
+  const required = ['ti', 'ci', 'cs', 'iu', 'pu', 'ot', 'saak', 'sask'];
+  const envHasAllFields = required.every((key) => envConfig[key]);
+
+  if (envHasAllFields) {
+    cachedConfig = envConfig;
+    return cachedConfig;
+  }
 
   const ionapiPath = process.env.IONAPI_PATH || DEFAULT_IONAPI_PATH;
 
   if (!fs.existsSync(ionapiPath)) {
     throw new Error(
-      `LN credentials file not found at "${ionapiPath}". ` +
-      `Place your .ionapi file at config/credentials.ionapi, or set the ` +
-      `IONAPI_PATH environment variable to its location.`
+      `No LN credentials found. Either set the LN_TI, LN_CI, LN_CS, LN_IU, ` +
+      `LN_PU, LN_OT, LN_SAAK, and LN_SASK environment variables, or place a ` +
+      `.ionapi file at "${ionapiPath}" (or point IONAPI_PATH at one).`
     );
   }
 
   const raw = fs.readFileSync(ionapiPath, 'utf8');
   const parsed = JSON.parse(raw);
 
-  const required = ['ti', 'ci', 'cs', 'iu', 'pu', 'ot', 'saak', 'sask'];
   for (const key of required) {
     if (!parsed[key]) {
       throw new Error(`LN credentials file is missing required field "${key}".`);
