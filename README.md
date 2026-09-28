@@ -8,25 +8,34 @@ Node.js backend that pulls **live data from Infor LN** for several widgets.
 
 | Widget | Data source |
 |---|---|
-| Widget 1 — New Order Review | **Live** — most recent Sales Order via `tdapi.slsSalesOrder` |
-| Widget 4 — Customer Insight (name, tier, revenue) | **Live** — `tcapi.comBusinessPartner` |
-| Customer Claims & Cstat (open claims count) | **Live** — `tsapi.cmmCustomerClaim` |
-| Widget 2 — Commitment Risk Summary | Mocked (narrative/AI-generated content) |
-| Widget 3 — Recommended Recovery Scenario | Mocked (no LN API generates scenario options) |
-| Widget 5 — Capacity Utilization | Mocked — see note below |
-| Widget 6 — Existing Commitments at Risk | Mocked (no single API for cross-order risk) |
+| KPI bar (open orders, at risk, revenue exposure, confidence) | **Live** — open lines from `tdapi.slsSalesOrder` |
+| New Order Review | **Live** — `tdapi.slsSalesOrder` (latest order, or `?salesOrder=`) |
+| Customer Insight | **Live** — `tcapi.comBusinessPartner` + 12-month delivery history |
+| Customer Claims & Cstat | **Live** — `tsapi.cmmCustomerClaim`; Cstat computed server-side |
+| Capacity Utilization | **Live work centers** — `tiapi.sfcProductionOrder`, `txest.ProductionWorkCenter` (load adjusted by demo layer) |
+| Existing Commitments at Risk | **Live** — open lines planned later than requested |
+| Commitment Risk Summary, Recovery Scenarios, Recommendation | **Infor GenAI**, grounded in the live data above, with a rule-based fallback |
 
-If any live call fails or the backend isn't running, every widget falls back
-to its original illustrative mock values automatically — the workspace
-never breaks or shows blank fields.
+If the backend is unreachable, the page keeps its built-in sample content.
 
-### Note on Widget 5 (Capacity Utilization)
+### Demo data layer
 
-The correct live data source is `plaps.PlannerPlus` → `ResourceUtilizationDatas`,
-which has pre-computed `Utilization`, `Overload`, `Available`, and `Used`
-fields. On this tenant that endpoint currently returns zero rows (Advanced
-Planning/Scheduling doesn't appear to have been run with data here yet), so
-Widget 5 remains mocked until that data exists.
+Demo tenants have thin data, so by default the server fills gaps with
+believable, consistent values (real LN values always win):
+
+- Customer tier and annual revenue, where LN has none, derived from the customer's order volume.
+- Constraint work center load of 105–118% against the weekly capacity stand-in.
+
+Set `DEMO_ENRICH=false` to show raw LN data only.
+
+### Settings (environment variables)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEMO_ENRICH` | `true` | Demo data layer on/off |
+| `WC_WEEKLY_CAPACITY_HOURS` | `80` | Available hours per work center per week |
+| `RISK_WINDOW_PAST_DAYS` / `RISK_WINDOW_FUTURE_DAYS` | `30` / `90` | Requested-date window for "at risk" |
+| `GENAI_MODEL_VERSION`, `GENAI_LOGICAL_ID_PREFIX` | service default / `lid://infor.ln` | GenAI call settings |
 
 ## Running it
 

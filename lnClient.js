@@ -121,23 +121,29 @@ function httpsPostForm(url, formFields) {
 }
 
 /**
- * Performs an authenticated HTTPS GET against an LN OData endpoint.
+ * Performs an authenticated HTTPS request against an ION API endpoint.
  * Returns { statusCode, body } where body is the raw response text.
  */
-function httpsGet(url, token) {
+function httpsRequest(method, url, token, { headers = {}, body = null, timeout = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
+    const payload = body ? JSON.stringify(body) : null;
 
     const req = https.request(
       {
         hostname: urlObj.hostname,
+        port: urlObj.port || 443,
         path: urlObj.pathname + urlObj.search,
-        method: 'GET',
+        method,
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
+          ...headers,
+          ...(payload
+            ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+            : {}),
         },
-        timeout: 20000,
+        timeout,
       },
       (res) => {
         let data = '';
@@ -148,9 +154,10 @@ function httpsGet(url, token) {
       }
     );
     req.on('timeout', () => {
-      req.destroy(new Error('LN request timed out'));
+      req.destroy(new Error('ION API request timed out'));
     });
     req.on('error', reject);
+    if (payload) req.write(payload);
     req.end();
   });
 }
@@ -205,16 +212,18 @@ function getBaseUrl() {
  * Throws a descriptive error if the LN backend returns a non-2xx status
  * (including the increasingly familiar 503 when the backend is unreachable).
  */
-async function lnGet(relativePath) {
+async function lnGet(relativePathOrUrl, { maxPageSize } = {}) {
   const token = await getAccessToken();
-  const base = getBaseUrl();
-  const url = `${base}${relativePath}`;
+  const url = /^https?:\/\//i.test(relativePathOrUrl)
+    ? relativePathOrUrl
+    : `${getBaseUrl()}${relativePathOrUrl}`;
 
-  const { statusCode, body } = await httpsGet(url, token);
+  const headers = maxPageSize ? { Prefer: `odata.maxpagesize=${maxPageSize}` } : {};
+  const { statusCode, body } = await httpsRequest('GET', url, token, { headers });
 
   if (statusCode < 200 || statusCode >= 300) {
     const err = new Error(
-      `LN API request failed with HTTP ${statusCode} for ${relativePath}`
+      `LN API request failed with HTTP ${statusCode} for ${relativePathOrUrl}`
     );
     err.statusCode = statusCode;
     err.lnBody = body;
@@ -228,8 +237,62 @@ async function lnGet(relativePath) {
   }
 }
 
+/**
+ * Fetches all rows for an OData collection query, following @odata.nextLink
+ * pages. LN pages at 25 rows by default, so this requests larger pages via
+ * the Prefer header and stops at maxRows as a safety cap.
+ * Returns { rows, truncated }.
+ */
+async function lnGetAll(relativePath, { maxRows = 5000, pageSize = 500 } = {}) {
+  const rows = [];
+  let next = relativePath;
+  while (next && rows.length < maxRows) {
+    const data = await lnGet(next, { maxPageSize: pageSize });
+    rows.push(...(data.value || []));
+    next = data['@odata.nextLink'] || null;
+  }
+  return { rows: rows.slice(0, maxRows), truncated: Boolean(next) || rows.length > maxRows };
+}
+
+/**
+ * Calls the Infor GenAI LLM service (GENAI/llmsvc /api/v1/prompt) using the
+ * same ION service account token as LN. Returns the model's text content.
+ */
+async function genaiPrompt(prompt, { maxResponse = 1500, temperature = 0.2, version } = {}) {
+  const cfg = loadConfig();
+  const token = await getAccessToken();
+  const url = `${cfg.iu}/${cfg.ti}/GENAI/llmsvc/api/v1/prompt`;
+  const logicalIdPrefix = process.env.GENAI_LOGICAL_ID_PREFIX || 'lid://infor.ln';
+
+  const body = {
+    model: process.env.GENAI_MODEL || 'CLAUDE',
+    prompt,
+    config: { max_response: maxResponse, temperature },
+  };
+  const modelVersion = version || process.env.GENAI_MODEL_VERSION;
+  if (modelVersion) body.version = modelVersion;
+
+  const { statusCode, body: raw } = await httpsRequest('POST', url, token, {
+    headers: { 'x-infor-logicalidprefix': logicalIdPrefix },
+    body,
+    timeout: 90000,
+  });
+
+  if (statusCode < 200 || statusCode >= 300) {
+    const err = new Error(`GenAI request failed with HTTP ${statusCode}`);
+    err.statusCode = statusCode;
+    err.lnBody = raw;
+    throw err;
+  }
+
+  const parsed = JSON.parse(raw);
+  return parsed.content || '';
+}
+
 module.exports = {
   lnGet,
+  lnGetAll,
+  genaiPrompt,
   getAccessToken,
   getBaseUrl,
 };
